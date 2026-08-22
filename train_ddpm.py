@@ -67,7 +67,7 @@ def train(
     ensure_dirs()
 
     dataset = PushTReplayDataset(zarr_path, obs_horizon=obs_horizon, horizon=horizon)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
 
     action_dim = 2
     obs_dim = 5
