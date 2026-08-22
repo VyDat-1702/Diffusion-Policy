@@ -20,12 +20,14 @@ def evaluate(
     seed: int = 42,
     num_inference_steps: int = 100,
     use_ddim: bool = True,
+    ckpt_path: str = None,
 ) -> Dict[str, Any]:
     env = make_env(render_mode="human" if render else None)
     policy = load_policy(
         device=device,
         num_inference_steps=num_inference_steps,
         use_ddim=use_ddim,
+        ckpt_path=ckpt_path,
     )
 
     np.random.seed(seed)
@@ -93,6 +95,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_inference_steps", type=int, default=100)
     parser.add_argument("--use_ddim", action="store_true", default=True)
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file")
     args = parser.parse_args()
 
     evaluate(
@@ -100,4 +103,5 @@ if __name__ == "__main__":
         device=args.device,
         num_inference_steps=args.num_inference_steps,
         use_ddim=args.use_ddim,
+        ckpt_path=args.ckpt_path,
     )

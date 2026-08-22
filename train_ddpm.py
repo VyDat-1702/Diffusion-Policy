@@ -62,6 +62,7 @@ def train(
     save_every: int = 50,
     use_ema: bool = True,
     lr_warmup_steps: int = 500,
+    ckpt_dir: str = None,
 ):
     ensure_dirs()
 
@@ -119,6 +120,13 @@ def train(
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     ema = EMAModel(model, inv_gamma=1.0, power=0.75, min_value=0.0, max_value=0.9999) if use_ema else None
+
+    # Checkpoint path
+    if ckpt_dir:
+        os.makedirs(ckpt_dir, exist_ok=True)
+        ckpt_path = os.path.join(ckpt_dir, 'diffusion_policy.pt')
+    else:
+        ckpt_path = CKPT_PATH
 
     model.train()
     global_step = 0
@@ -183,8 +191,8 @@ def train(
                 'obs_normalizer': obs_normalizer,
                 'action_normalizer': action_normalizer,
             }
-            torch.save(save_dict, CKPT_PATH)
-            print(f"Saved checkpoint to {CKPT_PATH}")
+            torch.save(save_dict, ckpt_path)
+            print(f"Saved checkpoint to {ckpt_path}")
 
     # Final save
     save_dict = {
@@ -195,8 +203,8 @@ def train(
         'obs_normalizer': obs_normalizer,
         'action_normalizer': action_normalizer,
     }
-    torch.save(save_dict, CKPT_PATH)
-    print(f"Final checkpoint saved to {CKPT_PATH}")
+    torch.save(save_dict, ckpt_path)
+    print(f"Final checkpoint saved to {ckpt_path}")
 
 
 if __name__ == "__main__":
@@ -210,6 +218,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--use_ema", action="store_true", default=True)
     parser.add_argument("--lr_warmup_steps", type=int, default=500)
+    parser.add_argument("--ckpt_dir", type=str, default=None, help="Directory to save checkpoints (e.g., Google Drive path)")
     args = parser.parse_args()
 
     train(
@@ -222,4 +231,5 @@ if __name__ == "__main__":
         device=args.device,
         use_ema=args.use_ema,
         lr_warmup_steps=args.lr_warmup_steps,
+        ckpt_dir=args.ckpt_dir,
     )

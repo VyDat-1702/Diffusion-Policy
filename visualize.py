@@ -188,10 +188,8 @@ def compare_policy_vs_dataset(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default="mlp", choices=["mlp", "transformer"])
-    parser.add_argument("--d_model", type=int, default=256)
-    parser.add_argument("--nhead", type=int, default=4)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file")
     args = parser.parse_args()
 
     os.makedirs(PLOT_DIR, exist_ok=True)
@@ -201,9 +199,7 @@ if __name__ == "__main__":
     try:
         policy = load_policy(
             device=args.device,
-            model_type=args.model_type,
-            d_model=args.d_model,
-            nhead=args.nhead,
+            ckpt_path=args.ckpt_path,
         )
         obs = np.zeros(10)
         visualize_denoising_trajectory(policy, obs, save_path=os.path.join(PLOT_DIR, "denoising_trajectory.png"))
