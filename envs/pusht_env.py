@@ -3,7 +3,7 @@
 import numpy as np
 import pymunk
 import pygame
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 
 
 class PushTEnv:
@@ -37,13 +37,21 @@ class PushTEnv:
         self.target_pos = np.array([256.0, 256.0], dtype=np.float32)
         self.target_angle = 0.0
 
+        # Video recording
+        self._frames: List[np.ndarray] = []
+        self._recording = False
+
         self._init_pygame()
 
     def _init_pygame(self):
-        if self.render_mode == "human":
+        if self.render_mode in ("human", "rgb_array"):
             pygame.init()
-            self.screen = pygame.display.set_mode((self.window_size, self.window_size))
-            pygame.display.set_caption("Push-T")
+            if self.render_mode == "human":
+                self.screen = pygame.display.set_mode((self.window_size, self.window_size))
+                pygame.display.set_caption("Push-T")
+            else:
+                # Offscreen surface for rgb_array
+                self.screen = pygame.Surface((self.window_size, self.window_size))
             self.clock = pygame.time.Clock()
 
     def _create_space(self):
@@ -101,6 +109,7 @@ class PushTEnv:
         self.target_angle = np.random.uniform(-np.pi, np.pi)
 
         self.step_count = 0
+        self._frames = []
         return self._get_obs()
 
     def _get_obs(self) -> np.ndarray:
@@ -134,6 +143,10 @@ class PushTEnv:
             "target_angle": self.target_angle,
         }
 
+        # Capture frame if recording
+        if self._recording:
+            self._capture_frame()
+
         if self.render_mode == "human":
             self.render()
 
@@ -155,10 +168,31 @@ class PushTEnv:
     def _normalize_angle(self, angle: float) -> float:
         return (angle + np.pi) % (2 * np.pi) - np.pi
 
-    def render(self):
-        if self.render_mode != "human" or self.screen is None:
-            return
+    def start_recording(self):
+        """Start recording frames for video."""
+        self._recording = True
+        self._frames = []
+        self._capture_frame()  # Capture initial frame
 
+    def stop_recording(self) -> List[np.ndarray]:
+        """Stop recording and return frames."""
+        self._recording = False
+        frames = self._frames
+        self._frames = []
+        return frames
+
+    def _capture_frame(self):
+        """Capture current frame as RGB array."""
+        if self.screen is not None:
+            # Render current state
+            self._render_frame()
+            # Convert pygame surface to numpy array
+            frame = pygame.surfarray.array3d(self.screen)
+            frame = np.transpose(frame, (1, 0, 2))  # (H, W, C)
+            self._frames.append(frame.copy())
+
+    def _render_frame(self):
+        """Render current state to screen surface."""
         self.screen.fill((255, 255, 255))
 
         block_pos = self.block_body.position
@@ -182,8 +216,17 @@ class PushTEnv:
         agent_pos = self.agent_body.position
         pygame.draw.circle(self.screen, (100, 100, 200), (int(agent_pos.x), int(agent_pos.y)), int(self.agent_radius))
 
-        pygame.display.flip()
-        self.clock.tick(60)
+        if self.render_mode == "human":
+            pygame.display.flip()
+            self.clock.tick(60)
+
+    def render(self):
+        if self.render_mode not in ("human", "rgb_array") or self.screen is None:
+            return
+        self._render_frame()
+        if self.render_mode == "human":
+            pygame.display.flip()
+            self.clock.tick(60)
 
     def close(self):
         if self.screen is not None:

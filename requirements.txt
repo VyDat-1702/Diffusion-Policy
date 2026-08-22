@@ -4,6 +4,7 @@ matplotlib
 zarr
 pygame-ce
 pymunk
+imageio
 imageio-ffmpeg
 einops
 diffusers
