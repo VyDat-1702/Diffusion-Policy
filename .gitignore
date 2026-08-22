@@ -1,1 +1,28 @@
-checkpoints/*   
+# Checkpoints
+checkpoints/*.pt
+checkpoints/*.ckpt
+*.pt
+
+# Data
+data/pusht/*.zip
+data/pusht/pusht_cchi_v7_replay.zarr/
+
+# Outputs
+plots/
+videos/
+*.png
+*.mp4
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environment
+.env
+.venv
+venv/
+
+# IDE
+.vscode/
+.idea/
