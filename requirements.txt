@@ -1,0 +1,8 @@
+numpy
+torch
+matplotlib
+zarr
+pygame-ce
+pymunk
+imageio-ffmpeg
+ipykernel
