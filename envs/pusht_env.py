@@ -106,10 +106,11 @@ class PushTEnv:
         # (pusht_cchi_v7_replay.zarr was collected with this fixed target;
         # it is NOT randomized per episode).
         #
-        # NOTE: target_angle=0.0 here (not pi/4). This block is a SQUARE
-        # (Poly.create_box), not the official T-shape, and it always starts
-        # at angle=0.0 in reset() -- so the natural fixed target orientation
-        # for this custom env is 0.0, matching the block's rest pose.
+        # Empirically confirmed by inspecting the final block pose of all
+        # 206 demo episodes in the dataset (see inspect_target.py):
+        #   position: mean=(255.4, 255.8), std=(5.0, 5.3)  -> ~(256, 256)
+        #   angle:    mean=0.784 rad (44.9 deg), std=0.057 rad (3.2 deg) -> ~pi/4
+        # Low std across all episodes confirms a single fixed target pose.
         self.target_pos = np.array([256.0, 256.0], dtype=np.float32)
         self.target_angle = np.pi / 4
 
@@ -179,7 +180,17 @@ class PushTEnv:
     def _check_success(self) -> bool:
         block_pos = np.array(self.block_body.position)
         pos_error = np.linalg.norm(block_pos - self.target_pos)
-        angle_error = abs(self._normalize_angle(self.block_body.angle - self.target_angle))
+
+        # The block is a SQUARE -> visually symmetric under 90-degree
+        # rotation. Comparing raw angle vs target_angle directly wrongly
+        # penalizes orientations that are visually identical to the target
+        # (e.g. block at 135 deg looks the same as 45 deg for a square).
+        # Fold the angle difference into its nearest 90-degree-equivalent
+        # representative before checking against the threshold.
+        raw_diff = self._normalize_angle(self.block_body.angle - self.target_angle)
+        sym_period = np.pi / 2  # 90 degrees
+        angle_error = abs(((raw_diff + sym_period / 2) % sym_period) - sym_period / 2)
+
         return pos_error < 30.0 and angle_error < 0.3
 
     def _normalize_angle(self, angle: float) -> float:
