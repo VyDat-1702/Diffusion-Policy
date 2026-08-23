@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import torch
 import imageio
 from tqdm import tqdm
 
@@ -37,6 +38,9 @@ def record_video(
 
     # Create env with rgb_array render mode for video recording
     env = make_env(render_mode="rgb_array")
+
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     print(f"Recording {num_episodes} episodes to {output_path}...")
 
@@ -118,14 +122,16 @@ def record_comparison_video(
                     obs_buffer.append(obs)
                     step_count += 1
                     done = terminated or truncated
+                    print(f"  debug: block_angle={info['block_angle']:.3f} rad ({np.degrees(info['block_angle']) % 360:.1f}°)")
+
                     if terminated:
                         break
-
             frames = env.stop_recording()
             for frame in frames:
                 writer.append_data(frame)
 
             print(f"Episode {ep}: frames={len(frames)}")
+            
 
     env.close()
     print(f"Comparison video saved to {output_path}")

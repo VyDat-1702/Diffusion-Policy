@@ -102,11 +102,16 @@ class PushTEnv:
         self.block_body.velocity = (0, 0)
         self.block_body.angular_velocity = 0.0
 
-        self.target_pos = np.array([
-            np.random.uniform(150, 362),
-            np.random.uniform(150, 362)
-        ], dtype=np.float32)
-        self.target_angle = np.random.uniform(-np.pi, np.pi)
+        # Fixed goal pose, matching the original PushT task / demo dataset
+        # (pusht_cchi_v7_replay.zarr was collected with this fixed target;
+        # it is NOT randomized per episode).
+        #
+        # NOTE: target_angle=0.0 here (not pi/4). This block is a SQUARE
+        # (Poly.create_box), not the official T-shape, and it always starts
+        # at angle=0.0 in reset() -- so the natural fixed target orientation
+        # for this custom env is 0.0, matching the block's rest pose.
+        self.target_pos = np.array([256.0, 256.0], dtype=np.float32)
+        self.target_angle = np.pi / 4
 
         self.step_count = 0
         self._frames = []
@@ -125,10 +130,22 @@ class PushTEnv:
         dist = np.linalg.norm(direction)
         if dist > 1e-6:
             direction = direction / dist
-            force = direction * self.agent_force
-            self.agent_body.velocity = (float(force[0]), float(force[1]))
+            # Cap speed so the agent doesn't overshoot the target within this
+            # step (bang-bang full-speed motion causes oscillation/jitter
+            # once the agent is close to its target each control step).
+            speed = min(self.agent_force, dist / self.dt)
+            velocity = direction * speed
+            self.agent_body.velocity = (float(velocity[0]), float(velocity[1]))
+        else:
+            self.agent_body.velocity = (0.0, 0.0)
 
-        self.space.step(self.dt)
+        # Substep physics to avoid tunneling: a single large dt=1/60 step lets
+        # a fast-moving block pass through thin wall Segments without a
+        # collision being detected. Splitting into smaller steps fixes this.
+        n_substeps = 5
+        sub_dt = self.dt / n_substeps
+        for _ in range(n_substeps):
+            self.space.step(sub_dt)
         self.step_count += 1
 
         obs = self._get_obs()
