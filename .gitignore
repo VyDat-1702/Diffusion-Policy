@@ -7,10 +7,6 @@ checkpoints/*.ckpt
 data/pusht/*.zip
 data/pusht/pusht_cchi_v7_replay.zarr/
 
-# Outputs
-plots/
-*.png
-
 # Python
 __pycache__/
 *.pyc
