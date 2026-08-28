@@ -1,0 +1,1 @@
+find checkpoint at: https://huggingface.co/VyDat/PushT_Model/blob/main/diffusion_policy.pt
