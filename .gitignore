@@ -9,9 +9,7 @@ data/pusht/pusht_cchi_v7_replay.zarr/
 
 # Outputs
 plots/
-videos/
 *.png
-*.mp4
 
 # Python
 __pycache__/
