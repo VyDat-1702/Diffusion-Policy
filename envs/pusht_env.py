@@ -1,4 +1,15 @@
-"""Push-T environment using PyMunk (2D physics)."""
+"""Push-T environment (PyMunk 2D physics).
+
+Re-implementation of the environment that produced ``pusht_cchi_v7_replay.zarr``
+(Chi et al., RSS 2023):
+
+* T-shaped block (two disjoint convex quads, ``scale=30``, ``length=4``)
+* Kinematic agent driven by a PD controller at ``sim_hz=100`` / ``control_hz=10``
+  (10 physics sub-steps per action)
+* ``space.damping = 0`` -> quasi-static pushing
+* Fixed goal pose ``(256, 256, pi/4)``, success when goal coverage > 0.95
+* Observation ``[agent_x, agent_y, block_x, block_y, block_angle % 2*pi]``
+"""
 
 import numpy as np
 import pymunk
@@ -6,36 +17,85 @@ import pygame
 from typing import Tuple, Optional, Dict, Any, List
 
 
+def _polygon_area(pts: np.ndarray) -> float:
+    x, y = pts[:, 0], pts[:, 1]
+    return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def _to_ccw(pts: np.ndarray) -> np.ndarray:
+    x, y = pts[:, 0], pts[:, 1]
+    signed = float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    return pts if signed >= 0 else pts[::-1]
+
+
+def _edge_intersect(a: np.ndarray, e: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
+    s = q - p
+    denom = e[0] * s[1] - e[1] * s[0]
+    if abs(denom) < 1e-12:
+        return q
+    t = ((p[0] - a[0]) * s[1] - (p[1] - a[1]) * s[0]) / denom
+    return a + t * e
+
+
+def _convex_intersection_area(subject: np.ndarray, clip: np.ndarray) -> float:
+    """Area of the intersection of two CONVEX polygons (Sutherland-Hodgman)."""
+    output = [row for row in _to_ccw(np.asarray(subject, dtype=np.float64))]
+    clip = _to_ccw(np.asarray(clip, dtype=np.float64))
+    n = len(clip)
+    for i in range(n):
+        if not output:
+            return 0.0
+        a = clip[i]
+        e = clip[(i + 1) % n] - a
+        inp, output = output, []
+        prev = inp[-1]
+        prev_side = e[0] * (prev[1] - a[1]) - e[1] * (prev[0] - a[0])
+        for cur in inp:
+            cur_side = e[0] * (cur[1] - a[1]) - e[1] * (cur[0] - a[0])
+            if cur_side >= 0:
+                if prev_side < 0:
+                    output.append(_edge_intersect(a, e, prev, cur))
+                output.append(cur)
+            elif prev_side >= 0:
+                output.append(_edge_intersect(a, e, prev, cur))
+            prev, prev_side = cur, cur_side
+    if len(output) < 3:
+        return 0.0
+    return _polygon_area(np.asarray(output))
+
+
 class PushTEnv:
-    """Push-T environment: push a T-shaped block to target position/orientation."""
+    """Push a T-shaped block onto a fixed goal pose."""
 
     def __init__(
         self,
         render_mode: Optional[str] = None,
         window_size: int = 512,
-        max_episode_steps: int = 200,
-        dt: float = 1.0 / 60.0,
+        max_episode_steps: int = 300,
+        success_threshold: float = 0.95,
     ):
         self.render_mode = render_mode
         self.window_size = window_size
         self.max_episode_steps = max_episode_steps
-        self.dt = dt
+        self.success_threshold = success_threshold
 
+        self.sim_hz = 100
+        self.control_hz = 10
+        self.k_p, self.k_v = 100.0, 20.0
         self.agent_radius = 15.0
-        self.block_mass = 1.0
-        self.block_moment = pymunk.moment_for_box(self.block_mass, (80, 80))
-        self.friction = 0.5
-        self.agent_force = 1000.0
+        self.block_scale = 30.0
+        self.block_length = 4
 
         self.space = None
-        self.agent_body = None
-        self.block_body = None
+        self.agent = None
+        self.block = None
         self.screen = None
         self.clock = None
         self.step_count = 0
 
-        self.target_pos = np.array([256.0, 256.0], dtype=np.float32)
-        self.target_angle = 0.0
+        self.goal_pose = np.array([256.0, 256.0, np.pi / 4], dtype=np.float64)
+        self.target_pos = self.goal_pose[:2].copy()
+        self.target_angle = float(self.goal_pose[2])
 
         # Video recording
         self._frames: List[np.ndarray] = []
@@ -54,112 +114,111 @@ class PushTEnv:
                 self.screen = pygame.Surface((self.window_size, self.window_size))
             self.clock = pygame.time.Clock()
 
+    def _add_tee(self, position, angle):
+        scale, length = self.block_scale, self.block_length
+        mass = 1.0
+        vertices1 = [
+            (-length * scale / 2, scale),
+            (length * scale / 2, scale),
+            (length * scale / 2, 0),
+            (-length * scale / 2, 0),
+        ]
+        vertices2 = [
+            (-scale / 2, scale),
+            (-scale / 2, length * scale),
+            (scale / 2, length * scale),
+            (scale / 2, scale),
+        ]
+        inertia1 = pymunk.moment_for_poly(mass, vertices=vertices1)
+        # The reference implementation passes vertices1 here too; replicated
+        # on purpose so the rotational dynamics match the demo dataset.
+        inertia2 = pymunk.moment_for_poly(mass, vertices=vertices1)
+        body = pymunk.Body(mass, inertia1 + inertia2)
+        shape1 = pymunk.Poly(body, vertices1)
+        shape2 = pymunk.Poly(body, vertices2)
+        body.center_of_gravity = (shape1.center_of_gravity + shape2.center_of_gravity) / 2
+        body.position = position
+        body.angle = angle
+        self.space.add(body, shape1, shape2)
+        return body
+
     def _create_space(self):
         self.space = pymunk.Space()
         self.space.gravity = (0, 0)
-        self.space.damping = 0.1
+        self.space.damping = 0
 
+        ws = self.window_size
         walls = [
-            pymunk.Segment(self.space.static_body, (0, 0), (self.window_size, 0), 5),
-            pymunk.Segment(self.space.static_body, (self.window_size, 0), (self.window_size, self.window_size), 5),
-            pymunk.Segment(self.space.static_body, (self.window_size, self.window_size), (0, self.window_size), 5),
-            pymunk.Segment(self.space.static_body, (0, self.window_size), (0, 0), 5),
+            pymunk.Segment(self.space.static_body, (5, ws - 6), (5, 5), 2),
+            pymunk.Segment(self.space.static_body, (5, 5), (ws - 6, 5), 2),
+            pymunk.Segment(self.space.static_body, (ws - 6, 5), (ws - 6, ws - 6), 2),
+            pymunk.Segment(self.space.static_body, (5, ws - 6), (ws - 6, ws - 6), 2),
         ]
-        for wall in walls:
-            wall.friction = self.friction
-            wall.elasticity = 0.0
         self.space.add(*walls)
 
-        self.agent_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-        self.agent_body.position = (100, 100)
-        agent_shape = pymunk.Circle(self.agent_body, self.agent_radius)
-        agent_shape.friction = self.friction
-        agent_shape.elasticity = 0.0
-        agent_shape.collision_type = 1
-        self.space.add(self.agent_body, agent_shape)
+        self.agent = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        self.agent.position = (256, 400)
+        agent_shape = pymunk.Circle(self.agent, self.agent_radius)
+        self.space.add(self.agent, agent_shape)
 
-        self.block_body = pymunk.Body(self.block_mass, self.block_moment)
-        self.block_body.position = (256, 256)
-        self.block_body.angle = 0.0
-        block_shape = pymunk.Poly.create_box(self.block_body, (80, 80))
-        block_shape.friction = self.friction
-        block_shape.elasticity = 0.0
-        block_shape.collision_type = 2
-        self.space.add(self.block_body, block_shape)
+        self.block = self._add_tee((256, 300), 0.0)
 
     def reset(self, seed: Optional[int] = None) -> np.ndarray:
-        if seed is not None:
-            np.random.seed(seed)
-
-        if self.space is not None:
-            self.space.remove(*list(self.space.bodies), *list(self.space.shapes), *list(self.space.constraints))
-
         self._create_space()
 
-        self.agent_body.position = (100, 100)
-        self.block_body.position = (256, 256)
-        self.block_body.angle = 0.0
-        self.block_body.velocity = (0, 0)
-        self.block_body.angular_velocity = 0.0
+        # Same sampling ranges as the demo collection script, so evaluation
+        # states stay inside the training distribution.
+        rs = np.random.RandomState(seed=seed)
+        state = np.array([
+            rs.randint(50, 450), rs.randint(50, 450),
+            rs.randint(100, 400), rs.randint(100, 400),
+            rs.randn() * 2 * np.pi - np.pi,
+        ], dtype=np.float64)
 
-        # Fixed goal pose, matching the original PushT task / demo dataset
-        # (pusht_cchi_v7_replay.zarr was collected with this fixed target;
-        # it is NOT randomized per episode).
-        #
-        # Empirically confirmed by inspecting the final block pose of all
-        # 206 demo episodes in the dataset (see inspect_target.py):
-        #   position: mean=(255.4, 255.8), std=(5.0, 5.3)  -> ~(256, 256)
-        #   angle:    mean=0.784 rad (44.9 deg), std=0.057 rad (3.2 deg) -> ~pi/4
-        # Low std across all episodes confirms a single fixed target pose.
-        self.target_pos = np.array([256.0, 256.0], dtype=np.float32)
-        self.target_angle = np.pi / 4
+        self.agent.position = (float(state[0]), float(state[1]))
+        self.agent.velocity = (0.0, 0.0)
+        # Angle first: rotation happens about the center of gravity, which
+        # also shifts the geometric position.
+        self.block.angle = float(state[4])
+        self.block.position = (float(state[2]), float(state[3]))
+        self.block.velocity = (0.0, 0.0)
+        self.block.angular_velocity = 0.0
+        self.space.step(1.0 / self.sim_hz)
 
         self.step_count = 0
         self._frames = []
         return self._get_obs()
 
     def _get_obs(self) -> np.ndarray:
-        agent_pos = np.array(self.agent_body.position, dtype=np.float32)
-        block_pos = np.array(self.block_body.position, dtype=np.float32)
-        block_angle = np.array([self.block_body.angle], dtype=np.float32)
-        return np.concatenate([agent_pos, block_pos, block_angle])
+        return np.array(
+            tuple(self.agent.position)
+            + tuple(self.block.position)
+            + (self.block.angle % (2 * np.pi),),
+            dtype=np.float32,
+        )
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        target_pos = np.clip(action, self.agent_radius, self.window_size - self.agent_radius)
-        current_pos = np.array(self.agent_body.position)
-        direction = target_pos - current_pos
-        dist = np.linalg.norm(direction)
-        if dist > 1e-6:
-            direction = direction / dist
-            # Cap speed so the agent doesn't overshoot the target within this
-            # step (bang-bang full-speed motion causes oscillation/jitter
-            # once the agent is close to its target each control step).
-            speed = min(self.agent_force, dist / self.dt)
-            velocity = direction * speed
-            self.agent_body.velocity = (float(velocity[0]), float(velocity[1]))
-        else:
-            self.agent_body.velocity = (0.0, 0.0)
+        action = np.asarray(action, dtype=np.float64)
+        dt = 1.0 / self.sim_hz
+        n_steps = self.sim_hz // self.control_hz
 
-        # Substep physics to avoid tunneling: a single large dt=1/60 step lets
-        # a fast-moving block pass through thin wall Segments without a
-        # collision being detected. Splitting into smaller steps fixes this.
-        n_substeps = 5
-        sub_dt = self.dt / n_substeps
-        for _ in range(n_substeps):
-            self.space.step(sub_dt)
+        for _ in range(n_steps):
+            agent_pos = np.array(self.agent.position)
+            agent_vel = np.array(self.agent.velocity)
+            acceleration = self.k_p * (action - agent_pos) + self.k_v * (-agent_vel)
+            new_vel = agent_vel + acceleration * dt
+            self.agent.velocity = (float(new_vel[0]), float(new_vel[1]))
+            self.space.step(dt)
+
         self.step_count += 1
 
-        obs = self._get_obs()
-        reward = self._compute_reward()
-        terminated = self._check_success()
+        coverage = self._compute_coverage()
+        reward = float(np.clip(coverage / self.success_threshold, 0.0, 1.0))
+        terminated = coverage > self.success_threshold
         truncated = self.step_count >= self.max_episode_steps
 
-        info = {
-            "block_pos": np.array(self.block_body.position),
-            "block_angle": self.block_body.angle,
-            "target_pos": self.target_pos,
-            "target_angle": self.target_angle,
-        }
+        obs = self._get_obs()
+        info = self.get_info(coverage)
 
         # Capture frame if recording
         if self._recording:
@@ -170,31 +229,50 @@ class PushTEnv:
 
         return obs, reward, terminated, truncated, info
 
-    def _compute_reward(self) -> float:
-        block_pos = np.array(self.block_body.position)
-        pos_error = np.linalg.norm(block_pos - self.target_pos)
-        angle_error = abs(self._normalize_angle(self.block_body.angle - self.target_angle))
-        reward = -pos_error - 10.0 * angle_error
-        return float(reward)
+    def get_info(self, coverage: Optional[float] = None) -> Dict[str, Any]:
+        if coverage is None:
+            coverage = self._compute_coverage()
+        return {
+            "block_pos": np.array(self.block.position),
+            "block_angle": self.block.angle % (2 * np.pi),
+            "target_pos": self.target_pos,
+            "target_angle": self.target_angle,
+            "coverage": coverage,
+        }
 
-    def _check_success(self) -> bool:
-        block_pos = np.array(self.block_body.position)
-        pos_error = np.linalg.norm(block_pos - self.target_pos)
+    def _body_polys(self, body, shapes=None) -> List[np.ndarray]:
+        shapes = body.shapes if shapes is None else shapes
+        polys = []
+        for shape in shapes:
+            if not isinstance(shape, pymunk.Poly):
+                continue
+            verts = [body.local_to_world(v) for v in shape.get_vertices()]
+            polys.append(np.array([[v.x, v.y] for v in verts], dtype=np.float64))
+        return polys
 
-        # The block is a SQUARE -> visually symmetric under 90-degree
-        # rotation. Comparing raw angle vs target_angle directly wrongly
-        # penalizes orientations that are visually identical to the target
-        # (e.g. block at 135 deg looks the same as 45 deg for a square).
-        # Fold the angle difference into its nearest 90-degree-equivalent
-        # representative before checking against the threshold.
-        raw_diff = self._normalize_angle(self.block_body.angle - self.target_angle)
-        sym_period = np.pi / 2  # 90 degrees
-        angle_error = abs(((raw_diff + sym_period / 2) % sym_period) - sym_period / 2)
+    def _block_polys(self) -> List[np.ndarray]:
+        return self._body_polys(self.block)
 
-        return pos_error < 30.0 and angle_error < 0.3
+    def _goal_polys(self) -> List[np.ndarray]:
+        goal_body = pymunk.Body(1, 1)
+        goal_body.position = (float(self.goal_pose[0]), float(self.goal_pose[1]))
+        goal_body.angle = float(self.goal_pose[2])
+        return self._body_polys(goal_body, shapes=self.block.shapes)
 
-    def _normalize_angle(self, angle: float) -> float:
-        return (angle + np.pi) % (2 * np.pi) - np.pi
+    def _compute_coverage(self) -> float:
+        goal_polys = self._goal_polys()
+        block_polys = self._block_polys()
+        goal_area = sum(_polygon_area(p) for p in goal_polys)
+        if goal_area <= 0:
+            return 0.0
+        # Goal and block are each a union of two disjoint convex quads, so the
+        # union intersection is exactly the sum of the pairwise intersections.
+        inter = sum(
+            _convex_intersection_area(g, b)
+            for g in goal_polys
+            for b in block_polys
+        )
+        return float(inter / goal_area)
 
     def start_recording(self):
         """Start recording frames for video."""
@@ -223,38 +301,22 @@ class PushTEnv:
         """Render current state to screen surface."""
         self.screen.fill((255, 255, 255))
 
-        block_pos = self.block_body.position
-        block_angle = self.block_body.angle
-        block_verts = [
-            pymunk.Vec2d(-40, -40).rotated(block_angle) + block_pos,
-            pymunk.Vec2d(40, -40).rotated(block_angle) + block_pos,
-            pymunk.Vec2d(40, 40).rotated(block_angle) + block_pos,
-            pymunk.Vec2d(-40, 40).rotated(block_angle) + block_pos,
-        ]
-        pygame.draw.polygon(self.screen, (200, 100, 100), [(int(v.x), int(v.y)) for v in block_verts])
+        for poly in self._goal_polys():
+            pygame.draw.polygon(self.screen, (144, 238, 144), [(int(x), int(y)) for x, y in poly])
+        for poly in self._block_polys():
+            pygame.draw.polygon(self.screen, (119, 136, 153), [(int(x), int(y)) for x, y in poly])
 
-        target_verts = [
-            pymunk.Vec2d(-40, -40).rotated(self.target_angle) + self.target_pos,
-            pymunk.Vec2d(40, -40).rotated(self.target_angle) + self.target_pos,
-            pymunk.Vec2d(40, 40).rotated(self.target_angle) + self.target_pos,
-            pymunk.Vec2d(-40, 40).rotated(self.target_angle) + self.target_pos,
-        ]
-        pygame.draw.polygon(self.screen, (100, 200, 100), [(int(v.x), int(v.y)) for v in target_verts], 3)
-
-        agent_pos = self.agent_body.position
-        pygame.draw.circle(self.screen, (100, 100, 200), (int(agent_pos.x), int(agent_pos.y)), int(self.agent_radius))
+        agent_pos = self.agent.position
+        pygame.draw.circle(self.screen, (65, 105, 225), (int(agent_pos.x), int(agent_pos.y)), int(self.agent_radius))
 
         if self.render_mode == "human":
             pygame.display.flip()
-            self.clock.tick(60)
+            self.clock.tick(self.control_hz)
 
     def render(self):
         if self.render_mode not in ("human", "rgb_array") or self.screen is None:
             return
         self._render_frame()
-        if self.render_mode == "human":
-            pygame.display.flip()
-            self.clock.tick(60)
 
     def close(self):
         if self.screen is not None:

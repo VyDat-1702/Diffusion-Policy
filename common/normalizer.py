@@ -16,11 +16,20 @@ class LinearNormalizer:
         self.scale_ = None
         self.offset_ = None
 
-    def fit(self, data):
-        """Compute per-dimension min/max from data along axis 0 and store scale/offset."""
+    def fit(self, data, dim=None):
+        """Compute per-dimension min/max from data along axis 0 and store scale/offset.
+
+        With ``dim`` set, statistics are pooled over every feature block of that
+        width (e.g. all horizon steps of a flattened action chunk) and then
+        tiled back to the flattened width.
+        """
         data = np.asarray(data, dtype=np.float64)
-        self.min_ = data.min(axis=0)
-        self.max_ = data.max(axis=0)
+        repeat = 1
+        if dim is not None:
+            repeat = data.shape[-1] // dim
+            data = data.reshape(-1, dim)
+        self.min_ = np.tile(data.min(axis=0), repeat)
+        self.max_ = np.tile(data.max(axis=0), repeat)
         span = self.max_ - self.min_
         # Degenerate dims (min == max): scale=1, offset=0 to avoid NaN.
         self.scale_ = np.where(span > 0, span, 1.0)

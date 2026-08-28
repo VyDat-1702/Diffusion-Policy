@@ -79,11 +79,11 @@ def train(
     for obs, action in dataset:
         all_obs.append(obs)
         all_actions.append(action)
-    obs_normalizer.fit(np.stack(all_obs))
-    action_normalizer.fit(np.stack(all_actions))
+    obs_normalizer.fit(np.stack(all_obs), dim=obs_dim)
+    action_normalizer.fit(np.stack(all_actions), dim=action_dim)
 
     # Create U-Net 1D matching original repo
-    model = create_unet1d(
+    net_config = dict(
         action_dim=action_dim,
         obs_dim=obs_dim,
         horizon=horizon,
@@ -94,7 +94,8 @@ def train(
         kernel_size=5,
         n_groups=8,
         cond_predict_scale=True,
-    ).to(device)
+    )
+    model = create_unet1d(**net_config).to(device)
 
     print(f"Model: U-Net 1D | Params: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -188,6 +189,7 @@ def train(
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'epoch': epoch,
+                'net_config': net_config,
                 'obs_normalizer': obs_normalizer,
                 'action_normalizer': action_normalizer,
             }
@@ -200,6 +202,7 @@ def train(
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict(),
         'epoch': epochs - 1,
+        'net_config': net_config,
         'obs_normalizer': obs_normalizer,
         'action_normalizer': action_normalizer,
     }

@@ -15,8 +15,8 @@ def record_video(
     ckpt_path: str,
     output_path: str = None,
     num_episodes: int = 5,
-    max_steps: int = 200,
-    fps: int = 30,
+    max_steps: int = 300,
+    fps: int = 10,
     device: str = "cuda",
     num_inference_steps: int = 100,
     use_ddim: bool = True,
@@ -75,7 +75,7 @@ def record_video(
 
             success = terminated
             pos_err = np.linalg.norm(info["block_pos"] - info["target_pos"])
-            print(f"Episode {ep}: {'SUCCESS' if success else 'FAIL'} | pos_err={pos_err:.1f} | frames={len(frames)}")
+            print(f"Episode {ep}: {'SUCCESS' if success else 'FAIL'} | coverage={info['coverage']:.3f} | pos_err={pos_err:.1f} | frames={len(frames)}")
 
     env.close()
     print(f"Video saved to {output_path}")
@@ -110,21 +110,19 @@ def record_comparison_video(
             step_count = 0
             obs_buffer = [obs] * 2
 
-            while not done and step_count < 200:
+            while not done and step_count < 300:
                 obs_stack = np.concatenate(obs_buffer[-2:])
                 action_chunk = policy.predict_action(obs_stack)
 
                 for i in range(8):
-                    if step_count >= 200:
+                    if step_count >= 300:
                         break
                     action = action_chunk[i * 2:(i + 1) * 2]
                     obs, reward, terminated, truncated, info = env.step(action)
                     obs_buffer.append(obs)
                     step_count += 1
                     done = terminated or truncated
-                    print(f"  debug: block_angle={info['block_angle']:.3f} rad ({np.degrees(info['block_angle']) % 360:.1f}°)")
-
-                    if terminated:
+                    if done:
                         break
             frames = env.stop_recording()
             for frame in frames:
@@ -144,10 +142,10 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_path", type=str, required=True, help="Path to checkpoint")
     parser.add_argument("--output", type=str, default=None, help="Output video path")
     parser.add_argument("--num_episodes", type=int, default=5)
-    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_inference_steps", type=int, default=100)
-    parser.add_argument("--use_ddim", action="store_true", default=True)
+    parser.add_argument("--no_ddim", action="store_true", help="Use DDPM sampling instead of DDIM")
     parser.add_argument("--comparison", action="store_true", help="Record comparison video")
     args = parser.parse_args()
 
@@ -167,5 +165,5 @@ if __name__ == "__main__":
             fps=args.fps,
             device=args.device,
             num_inference_steps=args.num_inference_steps,
-            use_ddim=args.use_ddim,
+            use_ddim=not args.no_ddim,
         )

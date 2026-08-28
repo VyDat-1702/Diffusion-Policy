@@ -18,7 +18,7 @@ def visualize_denoising_trajectory(
 ):
     trajectory = policy.predict_action_trajectory(obs)
 
-    action_horizon = policy.action_horizon
+    action_horizon = policy.n_action_steps
     action_dim = policy.action_dim
 
     fig, axes = plt.subplots(2, 5, figsize=(20, 8))
@@ -85,7 +85,7 @@ def visualize_dataset_actions(
     save_path: Optional[str] = None,
 ):
     """Visualize action distribution from dataset."""
-    dataset = PushTReplayDataset(zarr_path, obs_horizon=2, action_horizon=8)
+    dataset = PushTReplayDataset(zarr_path, obs_horizon=2, horizon=16)
 
     all_actions = []
     for _, action in dataset:
@@ -141,7 +141,7 @@ def compare_policy_vs_dataset(
     num_samples: int = 1000,
     save_path: Optional[str] = None,
 ):
-    dataset = PushTReplayDataset(zarr_path, obs_horizon=2, action_horizon=8)
+    dataset = PushTReplayDataset(zarr_path, obs_horizon=2, horizon=16)
 
     dataset_actions = []
     for _, action in dataset:

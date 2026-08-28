@@ -37,16 +37,28 @@ class DiffusionPolicy:
         self.num_inference_steps = num_inference_steps
 
         # Load normalizers from checkpoint (contains correct 32-dim normalizer)
-        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+        checkpoint = torch.load(ckpt_path or CKPT_PATH, map_location=device, weights_only=False)
         self.obs_normalizer = checkpoint['obs_normalizer']
         self.action_normalizer = checkpoint['action_normalizer']
 
+        # Architecture must match the one used at training time.
+        net_config = checkpoint.get('net_config', {}) if isinstance(checkpoint, dict) else {}
+        self.horizon = net_config.get('horizon', horizon)
+        self.n_obs_steps = net_config.get('n_obs_steps', n_obs_steps)
+        self.action_dim = net_config.get('action_dim', action_dim)
+        self.obs_dim = net_config.get('obs_dim', obs_dim)
+
         self.model = create_unet1d(
-            action_dim=action_dim,
-            obs_dim=obs_dim,
-            horizon=horizon,
-            n_obs_steps=n_obs_steps,
+            action_dim=self.action_dim,
+            obs_dim=self.obs_dim,
+            horizon=self.horizon,
+            n_obs_steps=self.n_obs_steps,
             obs_as_global_cond=True,
+            down_dims=net_config.get('down_dims', [256, 512, 1024]),
+            diffusion_step_embed_dim=net_config.get('diffusion_step_embed_dim', 256),
+            kernel_size=net_config.get('kernel_size', 5),
+            n_groups=net_config.get('n_groups', 8),
+            cond_predict_scale=net_config.get('cond_predict_scale', True),
         ).to(device)
 
         # Load model weights
@@ -114,11 +126,12 @@ class DiffusionPolicy:
         action_full = self.action_normalizer.unnormalize(naction_pred)  # (T * Da,)
         action_full = action_full.reshape(T, Da)  # (T, Da)
         
-        # Get action steps (oa_step_convention: start at To-1)
-        start = To - 1
+        # Get action steps: start at index 0 (current step), matching dataset
+        # where action[t : t+horizon] starts at the current timestep.
+        start = 0
         end = start + self.n_action_steps
         action = action_full[start:end]  # (n_action_steps, Da)
-        
+
         return action.reshape(-1)
 
     @torch.no_grad()
@@ -150,7 +163,7 @@ class DiffusionPolicy:
         for traj in traj_list:
             naction = traj[0, :, :Da].reshape(-1)
             action_full = self.action_normalizer.unnormalize(naction).reshape(T, Da)
-            start = To - 1
+            start = 0
             end = start + self.n_action_steps
             action = action_full[start:end]
             result.append(action.reshape(-1))
