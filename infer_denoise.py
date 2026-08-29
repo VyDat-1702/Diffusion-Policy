@@ -1,5 +1,3 @@
-"""Denoising inference for Diffusion Policy (U-Net 1D + diffusers scheduler)."""
-
 import torch
 import numpy as np
 from typing import List, Optional

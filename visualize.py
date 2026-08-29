@@ -2,12 +2,35 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import glob
+import os
 from typing import List, Optional
 
 from infer_denoise import DiffusionPolicy, load_policy
 from common.replay_dataset import PushTReplayDataset
 from paths import ZARR_PATH, PLOT_DIR
-import os
+
+
+def resolve_checkpoint_path(ckpt_path: str = None) -> str:
+    if ckpt_path is None:
+        return ckpt_path
+
+    if os.path.isdir(ckpt_path):
+        preferred_paths = [
+            os.path.join(ckpt_path, "diffusion_policy_best.pt"),
+            os.path.join(ckpt_path, "diffusion_policy.pt"),
+        ]
+        for candidate in preferred_paths:
+            if os.path.isfile(candidate):
+                return candidate
+
+        matches = glob.glob(os.path.join(ckpt_path, "*.pt"))
+        if matches:
+            return max(matches, key=os.path.getmtime)
+
+        raise FileNotFoundError(f"No checkpoint files found in directory: {ckpt_path}")
+
+    return ckpt_path
 
 
 def visualize_denoising_trajectory(
@@ -189,7 +212,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file")
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file or checkpoint directory")
     args = parser.parse_args()
 
     os.makedirs(PLOT_DIR, exist_ok=True)
@@ -199,7 +222,7 @@ if __name__ == "__main__":
     try:
         policy = load_policy(
             device=args.device,
-            ckpt_path=args.ckpt_path,
+            ckpt_path=resolve_checkpoint_path(args.ckpt_path),
         )
         obs = np.zeros(10)
         visualize_denoising_trajectory(policy, obs, save_path=os.path.join(PLOT_DIR, "denoising_trajectory.png"))

@@ -1,3 +1,5 @@
+import os
+import glob
 import numpy as np
 import torch
 from typing import Dict, Any
@@ -6,6 +8,28 @@ from tqdm import tqdm
 from envs.pusht_env import PushTEnv, make_env
 from infer_denoise import DiffusionPolicy, load_policy
 from paths import CKPT_PATH, NORMALIZER_PATH
+
+
+def resolve_checkpoint_path(ckpt_path: str = None) -> str:
+    if ckpt_path is None:
+        ckpt_path = CKPT_PATH
+
+    if os.path.isdir(ckpt_path):
+        preferred_paths = [
+            os.path.join(ckpt_path, "diffusion_policy_best.pt"),
+            os.path.join(ckpt_path, "diffusion_policy.pt"),
+        ]
+        for candidate in preferred_paths:
+            if os.path.isfile(candidate):
+                return candidate
+
+        matches = glob.glob(os.path.join(ckpt_path, "*.pt"))
+        if matches:
+            return max(matches, key=os.path.getmtime)
+
+        raise FileNotFoundError(f"No checkpoint files found in directory: {ckpt_path}")
+
+    return ckpt_path
 
 
 def evaluate(
@@ -21,11 +45,12 @@ def evaluate(
     ckpt_path: str = None,
 ) -> Dict[str, Any]:
     env = make_env(render_mode="human" if render else None)
+    resolved_ckpt_path = resolve_checkpoint_path(ckpt_path)
     policy = load_policy(
         device=device,
         num_inference_steps=num_inference_steps,
         use_ddim=use_ddim,
-        ckpt_path=ckpt_path,
+        ckpt_path=resolved_ckpt_path,
     )
 
     torch.manual_seed(seed)
@@ -104,7 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_inference_steps", type=int, default=100)
     parser.add_argument("--no_ddim", action="store_true", help="Use DDPM sampling instead of DDIM")
-    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file")
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to checkpoint file or checkpoint directory")
     args = parser.parse_args()
 
     evaluate(

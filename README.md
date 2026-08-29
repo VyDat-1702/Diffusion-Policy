@@ -121,13 +121,13 @@ python train_ddpm.py --epochs 500 --batch_size 256 --device cuda --use_ema \
 ### 4. Evaluate
 
 ```bash
-python evaluate.py --num_episodes 50 --device cuda --ckpt_path checkpoints/diffusion_policy.pt
+python evaluate.py --num_episodes 50 --device cuda --ckpt_path checkpoints
 ```
 
 ### 5. Visualize
 
 ```bash
-python visualize.py --device cuda --ckpt_path checkpoints/diffusion_policy.pt
+python visualize.py --device cuda --ckpt_path checkpoints
 ```
 
 ---

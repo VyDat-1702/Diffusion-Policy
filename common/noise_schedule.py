@@ -1,5 +1,4 @@
-"""Noise schedule using diffusers DDPMScheduler (matching original repo)."""
-
+import torch
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 
@@ -12,7 +11,6 @@ def create_noise_scheduler(
     clip_sample=True,
     prediction_type="epsilon",
 ):
-    """Create DDPMScheduler matching original repo config."""
     scheduler = DDPMScheduler(
         num_train_timesteps=num_train_timesteps,
         beta_start=beta_start,
@@ -30,7 +28,6 @@ NUM_TIMESTEPS = 100
 
 
 def get_betas(num_timesteps=NUM_TIMESTEPS, beta_start=0.0001, beta_end=0.02):
-    """Get betas from scheduler (for backward compat)."""
     scheduler = create_noise_scheduler(
         num_train_timesteps=num_timesteps,
         beta_start=beta_start,

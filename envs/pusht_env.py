@@ -1,16 +1,3 @@
-"""Push-T environment (PyMunk 2D physics).
-
-Re-implementation of the environment that produced ``pusht_cchi_v7_replay.zarr``
-(Chi et al., RSS 2023):
-
-* T-shaped block (two disjoint convex quads, ``scale=30``, ``length=4``)
-* Kinematic agent driven by a PD controller at ``sim_hz=100`` / ``control_hz=10``
-  (10 physics sub-steps per action)
-* ``space.damping = 0`` -> quasi-static pushing
-* Fixed goal pose ``(256, 256, pi/4)``, success when goal coverage > 0.95
-* Observation ``[agent_x, agent_y, block_x, block_y, block_angle % 2*pi]``
-"""
-
 import numpy as np
 import pymunk
 import pygame

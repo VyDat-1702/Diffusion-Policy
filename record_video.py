@@ -1,6 +1,7 @@
 """Record demo video of trained Diffusion Policy on Push-T."""
 
 import os
+import glob
 import numpy as np
 import torch
 import imageio
@@ -9,6 +10,25 @@ from tqdm import tqdm
 from envs.pusht_env import make_env
 from infer_denoise import DiffusionPolicy, load_policy
 from paths import VIDEO_DIR
+
+
+def resolve_checkpoint_path(ckpt_path: str) -> str:
+    if os.path.isdir(ckpt_path):
+        preferred_paths = [
+            os.path.join(ckpt_path, "diffusion_policy_best.pt"),
+            os.path.join(ckpt_path, "diffusion_policy.pt"),
+        ]
+        for candidate in preferred_paths:
+            if os.path.isfile(candidate):
+                return candidate
+
+        matches = glob.glob(os.path.join(ckpt_path, "*.pt"))
+        if matches:
+            return max(matches, key=os.path.getmtime)
+
+        raise FileNotFoundError(f"No checkpoint files found in directory: {ckpt_path}")
+
+    return ckpt_path
 
 
 def record_video(
@@ -30,7 +50,7 @@ def record_video(
 
     # Load policy
     policy = load_policy(
-        ckpt_path=ckpt_path,
+        ckpt_path=resolve_checkpoint_path(ckpt_path),
         device=device,
         num_inference_steps=num_inference_steps,
         use_ddim=use_ddim,
@@ -95,7 +115,7 @@ def record_comparison_video(
     if output_path is None:
         output_path = os.path.join(VIDEO_DIR, "comparison.mp4")
 
-    policy = load_policy(ckpt_path=ckpt_path, device=device)
+    policy = load_policy(ckpt_path=resolve_checkpoint_path(ckpt_path), device=device)
     env = make_env(render_mode="rgb_array")
 
     print(f"Recording comparison video to {output_path}...")

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from einops import reduce
 import copy
@@ -63,11 +63,21 @@ def train(
     use_ema: bool = True,
     lr_warmup_steps: int = 500,
     ckpt_dir: str = None,
+    val_split: float = 0.1,
+    seed: int = 42,
 ):
     ensure_dirs()
 
     dataset = PushTReplayDataset(zarr_path, obs_horizon=obs_horizon, horizon=horizon)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    val_size = max(1, int(len(dataset) * val_split))
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(
+        dataset,
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(seed),
+    )
+    dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
     action_dim = 2
     obs_dim = 5
@@ -76,7 +86,7 @@ def train(
     action_normalizer = LinearNormalizer()
     all_obs = []
     all_actions = []
-    for obs, action in dataset:
+    for obs, action in train_dataset:
         all_obs.append(obs)
         all_actions.append(action)
     obs_normalizer.fit(np.stack(all_obs), dim=obs_dim)
@@ -126,11 +136,14 @@ def train(
     if ckpt_dir:
         os.makedirs(ckpt_dir, exist_ok=True)
         ckpt_path = os.path.join(ckpt_dir, 'diffusion_policy.pt')
+        best_ckpt_path = os.path.join(ckpt_dir, 'diffusion_policy_best.pt')
     else:
         ckpt_path = CKPT_PATH
+        best_ckpt_path = os.path.join(os.path.dirname(CKPT_PATH), 'diffusion_policy_best.pt')
 
     model.train()
     global_step = 0
+    best_val_loss = float('inf')
     for epoch in range(epochs):
         epoch_loss = 0.0
         for obs, action in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", colour="#90ee90"):
@@ -181,33 +194,76 @@ def train(
 
         avg_loss = epoch_loss / len(dataloader)
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1}/{epochs} | Loss: {avg_loss:.6f} | LR: {current_lr:.2e}")
+        print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.6f} | LR: {current_lr:.2e}")
+
+        eval_model = ema.ema_model if use_ema else model
+        eval_model.eval()
+        val_loss_sum = 0.0
+        with torch.no_grad():
+            for obs, action in val_dataloader:
+                obs = torch.from_numpy(obs_normalizer.normalize(obs)).to(device, dtype=torch.float32)
+                action = torch.from_numpy(action_normalizer.normalize(action)).to(device, dtype=torch.float32)
+
+                B = obs.shape[0]
+                T = horizon
+                Da = action_dim
+                Do = obs_dim
+                To = obs_horizon
+
+                action = action.reshape(B, T, Da)
+                trajectory = action
+                noise = torch.randn_like(trajectory)
+                timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (B,), device=device).long()
+                noisy_trajectory = noise_scheduler.add_noise(trajectory, noise, timesteps)
+                global_cond = obs[:, :To * Do].reshape(B, -1)
+                pred = eval_model(noisy_trajectory, timesteps, global_cond=global_cond)
+                val_loss_sum += F.mse_loss(pred, noise).item()
+
+        avg_val_loss = val_loss_sum / len(val_dataloader)
+        print(f"Epoch {epoch+1}/{epochs} | Val Loss: {avg_val_loss:.6f} | LR: {current_lr:.2e}")
+
+        save_dict = {
+            'model': eval_model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'epoch': epoch,
+            'train_loss': avg_loss,
+            'val_loss': avg_val_loss,
+            'net_config': net_config,
+            'obs_normalizer': obs_normalizer,
+            'action_normalizer': action_normalizer,
+        }
 
         if (epoch + 1) % save_every == 0:
-            save_dict = {
-                'model': ema.state_dict() if use_ema else model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
-                'epoch': epoch,
-                'net_config': net_config,
-                'obs_normalizer': obs_normalizer,
-                'action_normalizer': action_normalizer,
-            }
-            torch.save(save_dict, ckpt_path)
-            print(f"Saved checkpoint to {ckpt_path}")
+            epoch_ckpt_path = os.path.join(os.path.dirname(ckpt_path), f"diffusion_policy_epoch_{epoch + 1:04d}.pt")
+            torch.save(save_dict, epoch_ckpt_path)
+            print(f"Saved checkpoint to {epoch_ckpt_path}")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(save_dict, best_ckpt_path)
+            print(f"Saved best checkpoint to {best_ckpt_path}")
 
     # Final save
     save_dict = {
-        'model': ema.state_dict() if use_ema else model.state_dict(),
+        'model': eval_model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict(),
         'epoch': epochs - 1,
+        'train_loss': avg_loss,
+        'val_loss': avg_val_loss,
         'net_config': net_config,
         'obs_normalizer': obs_normalizer,
         'action_normalizer': action_normalizer,
     }
     torch.save(save_dict, ckpt_path)
     print(f"Final checkpoint saved to {ckpt_path}")
+
+    if not os.path.exists(best_ckpt_path):
+        torch.save(save_dict, best_ckpt_path)
+        print(f"Best checkpoint saved to {best_ckpt_path}")
+
+        model.train()
 
 
 if __name__ == "__main__":
@@ -222,6 +278,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_ema", action="store_true", default=True)
     parser.add_argument("--lr_warmup_steps", type=int, default=500)
     parser.add_argument("--ckpt_dir", type=str, default=None, help="Directory to save checkpoints (e.g., Google Drive path)")
+    parser.add_argument("--val_split", type=float, default=0.1, help="Fraction of replay data used for validation")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     train(
@@ -235,4 +293,6 @@ if __name__ == "__main__":
         use_ema=args.use_ema,
         lr_warmup_steps=args.lr_warmup_steps,
         ckpt_dir=args.ckpt_dir,
+        val_split=args.val_split,
+        seed=args.seed,
     )
