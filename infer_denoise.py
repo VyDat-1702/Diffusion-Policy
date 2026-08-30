@@ -7,7 +7,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 
 from common.normalizer import LinearNormalizer
 from models.unet1d import create_unet1d
-from paths import CKPT_PATH, NORMALIZER_PATH
+from paths import BEST_CKPT_PATH, CKPT_PATH, NORMALIZER_PATH
 
 
 class DiffusionPolicy:
@@ -15,7 +15,7 @@ class DiffusionPolicy:
 
     def __init__(
         self,
-        ckpt_path: str = CKPT_PATH,
+        ckpt_path: str = BEST_CKPT_PATH,
         normalizer_path: str = NORMALIZER_PATH,
         action_dim: int = 2,
         obs_dim: int = 5,
@@ -169,7 +169,7 @@ class DiffusionPolicy:
 
 
 def load_policy(
-    ckpt_path: str = CKPT_PATH,
+    ckpt_path: str = BEST_CKPT_PATH,
     normalizer_path: str = NORMALIZER_PATH,
     device: str = "cuda",
     num_inference_steps: int = 100,

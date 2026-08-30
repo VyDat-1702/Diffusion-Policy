@@ -7,11 +7,13 @@ from tqdm import tqdm
 
 from envs.pusht_env import PushTEnv, make_env
 from infer_denoise import DiffusionPolicy, load_policy
-from paths import CKPT_PATH, NORMALIZER_PATH
+from paths import BEST_CKPT_PATH, CKPT_PATH, NORMALIZER_PATH
 
 
 def resolve_checkpoint_path(ckpt_path: str = None) -> str:
     if ckpt_path is None:
+        if os.path.isfile(BEST_CKPT_PATH):
+            return BEST_CKPT_PATH
         ckpt_path = CKPT_PATH
 
     if os.path.isdir(ckpt_path):
@@ -28,6 +30,9 @@ def resolve_checkpoint_path(ckpt_path: str = None) -> str:
             return max(matches, key=os.path.getmtime)
 
         raise FileNotFoundError(f"No checkpoint files found in directory: {ckpt_path}")
+
+    if ckpt_path is None:
+        return BEST_CKPT_PATH
 
     return ckpt_path
 
@@ -139,4 +144,4 @@ if __name__ == "__main__":
         num_inference_steps=args.num_inference_steps,
         use_ddim=not args.no_ddim,
         ckpt_path=args.ckpt_path,
-    )
+    )   

@@ -9,6 +9,7 @@ ZARR_PATH = os.path.join(DATA_DIR, 'pusht', 'pusht_cchi_v7_replay.zarr')
 # Checkpoints
 CHECKPOINT_DIR = os.path.join(PROJECT_ROOT, 'checkpoints')
 CKPT_PATH = os.path.join(CHECKPOINT_DIR, 'diffusion_policy.pt')
+BEST_CKPT_PATH = os.path.join(CHECKPOINT_DIR, 'diffusion_policy_best.pt')
 NORMALIZER_PATH = os.path.join(CHECKPOINT_DIR, 'normalizer.npz')
 
 # Outputs
