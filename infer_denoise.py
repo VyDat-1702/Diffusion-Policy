@@ -11,8 +11,6 @@ from paths import BEST_CKPT_PATH, CKPT_PATH, NORMALIZER_PATH
 
 
 class DiffusionPolicy:
-    """Diffusion Policy for action generation via denoising."""
-
     def __init__(
         self,
         ckpt_path: str = BEST_CKPT_PATH,
@@ -34,12 +32,10 @@ class DiffusionPolicy:
         self.n_action_steps = n_action_steps
         self.num_inference_steps = num_inference_steps
 
-        # Load normalizers from checkpoint (contains correct 32-dim normalizer)
         checkpoint = torch.load(ckpt_path or CKPT_PATH, map_location=device, weights_only=False)
         self.obs_normalizer = checkpoint['obs_normalizer']
         self.action_normalizer = checkpoint['action_normalizer']
 
-        # Architecture must match the one used at training time.
         net_config = checkpoint.get('net_config', {}) if isinstance(checkpoint, dict) else {}
         self.horizon = net_config.get('horizon', horizon)
         self.n_obs_steps = net_config.get('n_obs_steps', n_obs_steps)
@@ -86,13 +82,7 @@ class DiffusionPolicy:
 
     @torch.no_grad()
     def predict_action(self, obs: np.ndarray) -> np.ndarray:
-        """
-        Generate action via denoising.
-        Args:
-            obs: (n_obs_steps * obs_dim,) raw observation
-        Returns:
-            action: (n_action_steps * action_dim,) raw action
-        """
+
         obs_norm = self.obs_normalizer.normalize(obs.reshape(1, -1))
         obs_tensor = torch.from_numpy(obs_norm).to(self.device, dtype=torch.float32)
 

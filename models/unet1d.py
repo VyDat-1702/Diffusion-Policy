@@ -1,5 +1,3 @@
-"""Conditional U-Net 1D for Diffusion Policy (matching original repo)."""
-
 import torch
 import torch.nn as nn
 import einops
@@ -200,13 +198,7 @@ class ConditionalUnet1D(nn.Module):
         local_cond=None,
         global_cond=None,
     ):
-        """
-        sample: (B, T, input_dim) - noisy trajectory
-        timestep: (B,) - diffusion timestep
-        local_cond: (B, T, local_cond_dim) - optional local conditioning
-        global_cond: (B, global_cond_dim) - optional global conditioning
-        returns: (B, T, input_dim) - predicted noise
-        """
+
         sample = einops.rearrange(sample, 'b h t -> b t h')
 
         timesteps = timestep
@@ -268,7 +260,6 @@ def create_unet1d(
     n_groups=8,
     cond_predict_scale=True,
 ):
-    """Create U-Net 1D matching original repo config."""
     if obs_as_global_cond:
         input_dim = action_dim
         global_cond_dim = obs_dim * n_obs_steps

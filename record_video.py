@@ -1,5 +1,3 @@
-"""Record demo video of trained Diffusion Policy on Push-T."""
-
 import os
 import glob
 import numpy as np
@@ -42,7 +40,6 @@ def record_video(
     use_ddim: bool = True,
     seed: int = 42,
 ):
-    """Record video of policy rollouts."""
     os.makedirs(VIDEO_DIR, exist_ok=True)
     
     if output_path is None:
@@ -109,7 +106,6 @@ def record_comparison_video(
     fps: int = 30,
     device: str = "cuda",
 ):
-    """Record side-by-side comparison: policy vs oracle (expert)."""
     os.makedirs(VIDEO_DIR, exist_ok=True)
     
     if output_path is None:

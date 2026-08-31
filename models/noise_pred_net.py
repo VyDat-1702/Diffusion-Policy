@@ -7,8 +7,6 @@ from typing import Optional
 
 
 class SinusoidalPosEmb(nn.Module):
-    """Sinusoidal positional embedding for timesteps."""
-
     def __init__(self, dim: int):
         super().__init__()
         self.dim = dim
@@ -24,7 +22,6 @@ class SinusoidalPosEmb(nn.Module):
 
 
 class NoisePredMLP(nn.Module):
-    """MLP that predicts noise given (noisy_action, state, timestep)."""
 
     def __init__(
         self,
@@ -62,25 +59,13 @@ class NoisePredMLP(nn.Module):
         state: torch.Tensor,
         timestep: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Args:
-            noisy_action: (B, action_dim) - noisy action at timestep t
-            state: (B, state_dim) - conditioning state
-            timestep: (B,) - timestep indices
-        Returns:
-            predicted_noise: (B, action_dim)
-        """
+
         t_emb = self.time_mlp(timestep)
         x = torch.cat([noisy_action, state, t_emb], dim=-1)
         return self.net(x)
 
 
 class NoisePredTransformer(nn.Module):
-    """Transformer encoder that predicts noise given (noisy_action, state, timestep).
-    
-    Treats (noisy_action, state) as a sequence of tokens for self-attention.
-    More expressive than MLP for modeling temporal dependencies in action chunks.
-    """
 
     def __init__(
         self,
@@ -138,14 +123,7 @@ class NoisePredTransformer(nn.Module):
         state: torch.Tensor,
         timestep: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Args:
-            noisy_action: (B, action_dim) - noisy action at timestep t
-            state: (B, state_dim) - conditioning state
-            timestep: (B,) - timestep indices
-        Returns:
-            predicted_noise: (B, action_dim)
-        """
+
         B = noisy_action.shape[0]
 
         action_tokens = self.action_proj(noisy_action).unsqueeze(1)
@@ -180,7 +158,6 @@ def create_model(
     dim_feedforward: int = 1024,
     dropout: float = 0.1,
 ) -> nn.Module:
-    """Factory function to create model with flattened dimensions."""
     flat_action_dim = action_horizon * action_dim
     flat_state_dim = obs_horizon * state_dim
 
