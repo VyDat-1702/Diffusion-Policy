@@ -27,7 +27,6 @@ class PushTReplayDataset(Dataset):
         return indices
 
     def __len__(self):
-        """Total number of valid start positions across all episodes."""
         return len(self.indices)
 
     def __getitem__(self, idx):

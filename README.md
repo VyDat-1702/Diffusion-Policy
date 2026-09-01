@@ -29,15 +29,15 @@ This repository re-implements [Diffusion Policy](https://diffusion-policy.cs.col
 
 ### Core design
 
-| Component | Implementation |
-|---|---|
-| Architecture | Conditional U-Net 1D with down dimensions `[256, 512, 1024]`, kernel size `5`, FiLM conditioning |
-| Noise schedule | Cosine schedule via `diffusers.DDPMScheduler` |
-| Conditioning | Global conditioning from the first `n_obs_steps` observations |
-| Training target | Epsilon prediction with MSE loss |
-| EMA | `inv_gamma=1.0`, `power=0.75` |
-| Inference | DDIM sampling with 100 steps |
-| Optimizer | AdamW, `lr=1e-4`, `betas=(0.95, 0.999)`, `weight_decay=1e-6` |
+| Component       | Implementation                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| Architecture    | Conditional U-Net 1D with down dimensions `[256, 512, 1024]`, kernel size `5`, FiLM conditioning |
+| Noise schedule  | Cosine schedule via `diffusers.DDPMScheduler`                                                    |
+| Conditioning    | Global conditioning from the first `n_obs_steps` observations                                    |
+| Training target | Epsilon prediction with MSE loss                                                                 |
+| EMA             | `inv_gamma=1.0`, `power=0.75`                                                                    |
+| Inference       | DDIM sampling with 100 steps                                                                     |
+| Optimizer       | AdamW, `lr=1e-4`, `betas=(0.95, 0.999)`, `weight_decay=1e-6`                                     |
 
 ---
 
@@ -45,11 +45,11 @@ This repository re-implements [Diffusion Policy](https://diffusion-policy.cs.col
 
 <div align="center">
 
-<video src="./videos/demo.mp4" controls width="60%"></video>
+<img src="./videos/demo.gif" alt="Demo" width="60%" />
 
 </div>
 
-If your renderer does not display the embedded video, open [videos/demo.mp4](videos/demo.mp4) directly.
+If your renderer does not display the image, open [videos/demo.gif](videos/demo.gif) directly.
 
 ---
 
@@ -77,13 +77,13 @@ The repository already includes the main visual outputs under `plots/`:
 
 ## Why Diffusion Policy
 
-| Aspect | MSE Regression | Diffusion Policy |
-|---|---|---|
-| Model | Direct observation-to-action mapping | Noisy action plus observation -> predicted noise |
-| Training | `MSE(pred_action, expert_action)` | `MSE(pred_noise, true_noise)` |
-| Inference | Single forward pass | Iterative denoising |
-| Multimodality | Tends to average modes | Preserves multiple valid modes |
-| Action quality | Often smooth but generic | Often sharper and more realistic |
+| Aspect         | MSE Regression                       | Diffusion Policy                                 |
+| -------------- | ------------------------------------ | ------------------------------------------------ |
+| Model          | Direct observation-to-action mapping | Noisy action plus observation -> predicted noise |
+| Training       | `MSE(pred_action, expert_action)`    | `MSE(pred_noise, true_noise)`                    |
+| Inference      | Single forward pass                  | Iterative denoising                              |
+| Multimodality  | Tends to average modes               | Preserves multiple valid modes                   |
+| Action quality | Often smooth but generic             | Often sharper and more realistic                 |
 
 The important point is simple: MSE compresses uncertainty into one average action. Diffusion keeps the distribution alive and samples from it during inference.
 
